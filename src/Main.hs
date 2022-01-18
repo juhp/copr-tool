@@ -6,8 +6,10 @@ module Main (main) where
 
 import Data.Aeson.Types
 import qualified Data.ByteString.Char8 as B
+import qualified Data.HashMap.Strict as H
 import Data.List.Extra
 import Data.Maybe
+import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Data.Yaml (encode)
 import SimpleCmd
@@ -40,6 +42,12 @@ main = do
     , Subcommand "project"
       "Show project details" $
       projectCmd
+      <$> coprServerOpt
+      <*> strArg "COPR"
+
+    , Subcommand "monitor"
+      "Latest project chroot builds" $
+      monitorCmd
       <$> coprServerOpt
       <*> strArg "COPR"
 
@@ -114,6 +122,41 @@ packageCmd url copr pkg = do
   res <- coprGetPackage url user proj pkg
   -- FIXME improve output/order fields
   B.putStrLn $ encode res
+
+--type ChrootResult = (Text
+
+monitorCmd :: String -> String -> IO ()
+monitorCmd url copr = do
+  let (user,proj) = splitCopr copr
+  res <- coprMonitorProject url user proj
+  let pkgs = lookupKey' "packages" res :: [Object]
+  -- FIXME improve output/order fields
+  (mapM_ printPkgRes . mapMaybe pkgResults) pkgs
+  where
+    pkgResults :: Object -> Maybe (T.Text,Object)
+    pkgResults obj = do
+      name <- lookupKey "name" obj
+      chroots <- lookupKey "chroots" obj
+      return (name,chroots)
+
+    printPkgRes :: (T.Text,Object) -> IO ()
+    printPkgRes (name,chroots) = do
+      T.putStr $ name <> ": "
+      mapM_ printChRes $ H.toList chroots
+      T.putStrLn ""
+
+    printChRes :: (T.Text,Value) -> IO ()
+    printChRes (chr, val) =
+      T.putStr $ chr <>
+      case val of
+        Object obj -> chrState obj <> " "
+        _ -> error' $ "bad chroot result for " <> T.unpack chr
+      where
+        chrState :: Object -> T.Text
+        chrState obj = do
+          case lookupKey "state" obj of
+            Just st -> "[" <> st <> "]"
+            Nothing -> ""
 
 splitCopr :: String -> (String, String)
 splitCopr copr =
