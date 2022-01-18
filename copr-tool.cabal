@@ -30,12 +30,14 @@ executable copr-tool
   hs-source-dirs:      src
   build-depends:       base < 5,
                        aeson,
-                       copr-api,
+                       bytestring,
+                       copr-api >= 0.2,
                        extra,
                        http-directory,
                        simple-cmd,
                        simple-cmd-args,
-                       text
+                       text,
+                       yaml
   default-language:    Haskell2010
   ghc-options:         -Wall
   if impl(ghc >= 8.0)

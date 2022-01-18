@@ -1,1 +1,4 @@
-resolver: lts-18.21
+resolver: lts-18.22
+extra-deps:
+  - git: https://github.com/juhp/copr-api-hs.git
+    commit: 740df512894c76ff4eb81ff344f20e1188706265

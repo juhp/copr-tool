@@ -1,0 +1,6 @@
+packages: .
+
+source-repository-package
+    type: git
+    location: https://github.com/juhp/copr-api-hs.git
+    tag: 740df512894c76ff4eb81ff344f20e1188706265
