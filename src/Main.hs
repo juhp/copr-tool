@@ -1,16 +1,23 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE CPP, OverloadedStrings #-}
 
 -- SPDX-License-Identifier: BSD-3-Clause
 
 module Main (main) where
 
 import Data.Aeson.Types
+#if MIN_VERSION_aeson(2,0,0)
+import Data.Aeson.Key
+import qualified Data.Aeson.KeyMap as M
+#else
+import qualified Data.HashMap.Strict as M
+#endif
 import qualified Data.ByteString.Char8 as B
 import qualified Data.HashMap.Strict as H
 import Data.List.Extra
 import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import Data.Tuple.Extra
 import Data.Yaml (encode)
 import SimpleCmd
 import SimpleCmdArgs
@@ -142,8 +149,11 @@ monitorCmd url copr = do
     printPkgRes :: (T.Text,Object) -> IO ()
     printPkgRes (name,chroots) = do
       T.putStr $ name <> ": "
-      mapM_ printChRes $ H.toList chroots
+      mapM_ printChRes $ map (first toText) $ M.toList chroots
       T.putStrLn ""
+#if !MIN_VERSION_aeson(2,0,0)
+      where toText = id
+#endif
 
     printChRes :: (T.Text,Value) -> IO ()
     printChRes (chr, val) =
