@@ -4,6 +4,7 @@
 
 module Main (main) where
 
+import Control.Monad (forM_)
 import Data.Aeson.Types
 #if MIN_VERSION_aeson(2,0,0)
 import Data.Aeson.Key
@@ -12,13 +13,13 @@ import qualified Data.Aeson.KeyMap as M
 import qualified Data.HashMap.Strict as M
 #endif
 import qualified Data.ByteString.Char8 as B
-import qualified Data.HashMap.Strict as H
 import Data.List.Extra
 import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Data.Tuple.Extra
 import Data.Yaml (encode)
+import Network.HTTP.Directory (httpExists', httpFileSizeTime', (+/+))
 import SimpleCmd
 import SimpleCmdArgs
 import Web.Fedora.Copr
@@ -29,7 +30,7 @@ import qualified Paths_copr_tool
 main :: IO ()
 main = do
   simpleCmdArgs (Just Paths_copr_tool.version)
-    "Query and install Copr builds"
+    "Query tool for Copr"
     "see https://github.com/juhp/copr-tool#readme" $
     subcommands
     [
@@ -71,6 +72,12 @@ main = do
       <$> coprServerOpt
       <*> strArg "COPR"
       <*> strArg "PKG"
+
+    , Subcommand "progress"
+      "Follow current builds build log sizes" $
+      coprProgress
+      <$> coprServerOpt
+      <*> strArg "COPR"
 
     -- , Subcommand "install"
     --   "Install rpm packages directly from a Koji build task" $
@@ -174,3 +181,35 @@ splitCopr copr =
   case splitOn "/" copr of
     [u,c] | not (null u || null c) -> (u,c)
     _ -> error' $ "bad copr name: should be user/proj"
+
+coprProgress :: String -> String -> IO ()
+coprProgress server copr = do
+  let (user,proj) = splitCopr copr
+  res <- coprGetBuildList server user proj [makeItem "status" "running"]
+  let items = lookupKey' "items" res :: [Object]
+  forM_ items $ \build -> do
+    let repo_url = lookupKey' "repo_url" build
+        chroots = lookupKey' "chroots" build :: [String]
+        buildid = lookupKey' "id" build :: Int
+        source_package = lookupKey' "source_package" build
+        name = lookupKey' "name" source_package
+    print buildid
+    forM_ (sort chroots) $ \chroot -> do
+      -- copr-be.cloud.fedoraproject.org to avoid cloudflare caching
+      let results = replace "download.copr.fedorainfracloud.org" "copr-be.cloud.fedoraproject.org" repo_url +/+ chroot +/+ displayBuild buildid ++ "-" ++ name
+      -- print results
+      sizetime <- httpFileSizeTime' $ results +/+ "builder-live.log"
+      putStr $ chroot ++ ": " ++ renderSizeTime sizetime
+      success <- httpExists' $ results +/+ "success"
+      if success
+        then putStrLn " done"
+        else putStrLn ""
+  where
+    displayBuild :: Int -> String
+    displayBuild bid =
+      (if bid < 10000000 then ('0' :) else id) $
+      show bid
+
+    renderSizeTime (msize, mtime) =
+      -- FIXME render in KB
+      maybe "0" show msize ++ "B" +-+ maybe "" show mtime

@@ -1,0 +1,4 @@
+resolver: lts-18.28
+extra-deps:
+  - copr-api-0.2.0
+  - http-directory-0.1.10
