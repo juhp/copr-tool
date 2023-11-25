@@ -33,7 +33,7 @@ executable copr-tool
                        bytestring,
                        copr-api >= 0.2,
                        extra,
-                       -- http-directory,
+                       http-directory,
                        simple-cmd,
                        simple-cmd-args,
                        text,

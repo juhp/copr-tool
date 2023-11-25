@@ -57,6 +57,7 @@ main = do
       monitorCmd
       <$> coprServerOpt
       <*> strArg "COPR"
+      <*> optional (strOptionWith 'f' "fields" "FIELDS" "Comma separated list of extra fields")
 
     , Subcommand "packages"
       "List project packages" $
@@ -132,10 +133,10 @@ packageCmd url copr pkg = do
 
 --type ChrootResult = (Text
 
-monitorCmd :: String -> String -> IO ()
-monitorCmd url copr = do
+monitorCmd :: String -> String -> Maybe String -> IO ()
+monitorCmd url copr mfields = do
   let (user,proj) = splitCopr copr
-  res <- coprMonitorProject url user proj
+  res <- coprMonitorProject url user proj $ maybe [] (splitOn ",") mfields
   let pkgs = lookupKey' "packages" res :: [Object]
   -- FIXME improve output/order fields
   (mapM_ printPkgRes . mapMaybe pkgResults) pkgs
