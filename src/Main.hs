@@ -17,9 +17,10 @@ import Data.List.Extra
 import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import Data.Time (getCurrentTimeZone, utcToZonedTime)
+import Data.Time (defaultTimeLocale, formatTime, getCurrentTimeZone,
+                  NominalDiffTime, utcToZonedTime)
 import Data.Time.Clock (diffUTCTime, UTCTime)
-import Data.Time.Clock.System
+import Data.Time.Clock.System (SystemTime(MkSystemTime), systemToUTCTime)
 import Data.Tuple.Extra
 import Data.Yaml (encode)
 import Network.HTTP.Directory (httpExists', httpFileSizeTime', trailingSlash,
@@ -190,21 +191,20 @@ splitCopr copr =
 
 coprProgress :: Bool -> String -> String -> Maybe Int -> IO ()
 coprProgress debug server copr mbuild = do
-  let (user,proj) = splitCopr copr
   items <-
     case mbuild of
       Nothing -> do
+        let (user,proj) = splitCopr copr
         res <- coprGetBuildList server user proj [makeItem "status" "running"]
         return $ (lookupKey' "items" res :: [Object])
       Just buildid -> pure <$> coprGetBuild server buildid
   when debug $ print items
   forM_ items $ \build -> do
     when debug $ print build
-    let repo_url =
-          let ownername = lookupKey' "ownername" build
-              projectname = lookupKey' "projectname" build
-          -- copr-be.cloud.fedoraproject.org to avoid cloudflare caching
-          in "https://copr-be.cloud.fedoraproject.org/results" +/+ ownername +/+ projectname
+    let ownername = lookupKey' "ownername" build
+        projectname = lookupKey' "projectname" build
+        -- copr-be.cloud.fedoraproject.org to avoid cloudflare caching
+        repo_url = "https://copr-be.cloud.fedoraproject.org/results" +/+ ownername +/+ projectname
         chroots = lookupKey' "chroots" build :: [String]
         bid = lookupKey' "id" build :: Int
         source_package = lookupKey' "source_package" build
@@ -213,19 +213,18 @@ coprProgress debug server copr mbuild = do
         started_on = readTime' $ lookupKey' "started_on" build
     tz <- getCurrentTimeZone
     putStrLn $ show (utcToZonedTime tz started_on) +-+ show bid
-    -- FIXME print start time
+    putStrLn $ trailingSlash $ "https://copr.fedorainfracloud.org/coprs" +/+ ownername +/+ projectname +/+ "build" +/+ show bid
     forM_ (sort chroots) $ \chroot -> do
       let results = repo_url +/+ chroot +/+ displayBuild bid ++ "-" ++ name
-      putStrLn $ trailingSlash results
       -- FIXME maybe get all Headers
       -- FIXME this redirects to builder-live.log.gz
       sizetime <- httpFileSizeTime' $ results +/+ "builder-live.log"
-      -- FIXME print duration
       putStr $ renderBuild chroot tz sizetime started_on
       success <- httpExists' $ results +/+ "success"
       if success
         then putStrLn " done"
         else putStrLn ""
+      putStrLn $ trailingSlash results
   where
     displayBuild :: Int -> String
     displayBuild bid =
@@ -234,10 +233,28 @@ coprProgress debug server copr mbuild = do
 
     renderBuild chroot tz (msize, mtime) start =
       -- FIXME render in KB
-      maybe chroot (\t -> show (utcToZonedTime tz t) +-+ chroot +-+ show (diffUTCTime t start)) mtime +-+ maybe "0" show msize ++ "B"
+      maybe "" (\t -> show (utcToZonedTime tz t) +-+ renderDuration True (diffUTCTime t start)) mtime +-+ maybe "0" show msize ++ "B" +-+ chroot
 
 -- from koji-tool Time
 readTime' :: Double -> UTCTime
 readTime' =
   let mkSystemTime t = MkSystemTime t 0
   in systemToUTCTime . mkSystemTime . truncate
+
+-- derived from koji-tool Time
+renderDuration :: Bool -> NominalDiffTime -> String
+#if MIN_VERSION_time(1,9,0)
+renderDuration short dur =
+  let fmtstr
+        | dur < 60 = "%s" ++ secs
+        | dur < 3600 = "%m" ++ mins ++ "%S" ++ secs
+        | otherwise = "%h" ++ hrs ++ "%M" ++ mins
+  in formatTime defaultTimeLocale fmtstr dur
+  where
+    secs = if short then "s" else " sec"
+    mins = if short then "m" else " min"
+    hrs = if short then "h" else " hours"
+#else
+renderDuration short dur =
+  show dur ++ if short then "" else "sec"
+#endif
