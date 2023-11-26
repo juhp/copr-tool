@@ -17,8 +17,11 @@ import Data.List.Extra
 import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import Data.Time (defaultTimeLocale, formatTime, getCurrentTimeZone,
-                  NominalDiffTime, utcToZonedTime)
+import Data.Time (
+#if MIN_VERSION_time(1,9,0)
+  defaultTimeLocale, formatTime,
+#endif
+  getCurrentTimeZone, NominalDiffTime, utcToZonedTime)
 import Data.Time.Clock (diffUTCTime, UTCTime)
 import Data.Time.Clock.System (SystemTime(MkSystemTime), systemToUTCTime)
 import Data.Tuple.Extra
