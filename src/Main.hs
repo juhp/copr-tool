@@ -4,7 +4,7 @@
 
 module Main (main) where
 
-import Control.Monad (forM_)
+import Control.Monad (forM_, when)
 import Data.Aeson.Types
 #if MIN_VERSION_aeson(2,0,0)
 import Data.Aeson.Key
@@ -17,9 +17,13 @@ import Data.List.Extra
 import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import Data.Time (getCurrentTimeZone, utcToZonedTime)
+import Data.Time.Clock (diffUTCTime, UTCTime)
+import Data.Time.Clock.System
 import Data.Tuple.Extra
 import Data.Yaml (encode)
-import Network.HTTP.Directory (httpExists', httpFileSizeTime', (+/+))
+import Network.HTTP.Directory (httpExists', httpFileSizeTime', trailingSlash,
+                               (+/+))
 import SimpleCmd
 import SimpleCmdArgs
 import Web.Fedora.Copr
@@ -76,8 +80,10 @@ main = do
     , Subcommand "progress"
       "Follow current builds build log sizes" $
       coprProgress
-      <$> coprServerOpt
+      <$> switchWith 'D' "debug" "Debug output"
+      <*> coprServerOpt
       <*> strArg "COPR"
+      <*> optional (argumentWith auto "BUILD")
 
     -- , Subcommand "install"
     --   "Install rpm packages directly from a Koji build task" $
@@ -182,24 +188,40 @@ splitCopr copr =
     [u,c] | not (null u || null c) -> (u,c)
     _ -> error' $ "bad copr name: should be user/proj"
 
-coprProgress :: String -> String -> IO ()
-coprProgress server copr = do
+coprProgress :: Bool -> String -> String -> Maybe Int -> IO ()
+coprProgress debug server copr mbuild = do
   let (user,proj) = splitCopr copr
-  res <- coprGetBuildList server user proj [makeItem "status" "running"]
-  let items = lookupKey' "items" res :: [Object]
+  items <-
+    case mbuild of
+      Nothing -> do
+        res <- coprGetBuildList server user proj [makeItem "status" "running"]
+        return $ (lookupKey' "items" res :: [Object])
+      Just buildid -> pure <$> coprGetBuild server buildid
+  when debug $ print items
   forM_ items $ \build -> do
-    let repo_url = lookupKey' "repo_url" build
+    when debug $ print build
+    let repo_url =
+          let ownername = lookupKey' "ownername" build
+              projectname = lookupKey' "projectname" build
+          -- copr-be.cloud.fedoraproject.org to avoid cloudflare caching
+          in "https://copr-be.cloud.fedoraproject.org/results" +/+ ownername +/+ projectname
         chroots = lookupKey' "chroots" build :: [String]
-        buildid = lookupKey' "id" build :: Int
+        bid = lookupKey' "id" build :: Int
         source_package = lookupKey' "source_package" build
         name = lookupKey' "name" source_package
-    print buildid
+        -- FIXME can this fail?
+        started_on = readTime' $ lookupKey' "started_on" build
+    tz <- getCurrentTimeZone
+    putStrLn $ show (utcToZonedTime tz started_on) +-+ show bid
+    -- FIXME print start time
     forM_ (sort chroots) $ \chroot -> do
-      -- copr-be.cloud.fedoraproject.org to avoid cloudflare caching
-      let results = replace "download.copr.fedorainfracloud.org" "copr-be.cloud.fedoraproject.org" repo_url +/+ chroot +/+ displayBuild buildid ++ "-" ++ name
-      -- print results
+      let results = repo_url +/+ chroot +/+ displayBuild bid ++ "-" ++ name
+      putStrLn $ trailingSlash results
+      -- FIXME maybe get all Headers
+      -- FIXME this redirects to builder-live.log.gz
       sizetime <- httpFileSizeTime' $ results +/+ "builder-live.log"
-      putStr $ chroot ++ ": " ++ renderSizeTime sizetime
+      -- FIXME print duration
+      putStr $ renderBuild chroot tz sizetime started_on
       success <- httpExists' $ results +/+ "success"
       if success
         then putStrLn " done"
@@ -210,6 +232,12 @@ coprProgress server copr = do
       (if bid < 10000000 then ('0' :) else id) $
       show bid
 
-    renderSizeTime (msize, mtime) =
+    renderBuild chroot tz (msize, mtime) start =
       -- FIXME render in KB
-      maybe "0" show msize ++ "B" +-+ maybe "" show mtime
+      maybe chroot (\t -> show (utcToZonedTime tz t) +-+ chroot +-+ show (diffUTCTime t start)) mtime +-+ maybe "0" show msize ++ "B"
+
+-- from koji-tool Time
+readTime' :: Double -> UTCTime
+readTime' =
+  let mkSystemTime t = MkSystemTime t 0
+  in systemToUTCTime . mkSystemTime . truncate
