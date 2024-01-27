@@ -120,7 +120,7 @@ searchCmd url name = do
 -- FIXME print copr project url too
 projectCmd :: String -> String -> IO ()
 projectCmd url copr = do
-  let (user,proj) = splitCopr copr
+  let (user,proj) = splitCopr' copr
   res <- coprGetProject url user proj
   -- FIXME improve output/order fields
   B.putStrLn $ encode res
@@ -134,7 +134,7 @@ ownerCmd url user = do
 -- FIXME print project packages url
 packagesCmd :: String -> String -> IO ()
 packagesCmd url copr = do
-  let (user,proj) = splitCopr copr
+  let (user,proj) = splitCopr' copr
   res <- coprGetPackageList url user proj
   let items = lookupKey' "items" res :: [Object]
   -- FIXME improve output/order fields
@@ -143,7 +143,7 @@ packagesCmd url copr = do
 -- Not that useful - maybe remove?
 packageCmd :: String -> String -> String -> IO ()
 packageCmd url copr pkg = do
-  let (user,proj) = splitCopr copr
+  let (user,proj) = splitCopr' copr
   res <- coprGetPackage url user proj pkg
   -- FIXME improve output/order fields
   B.putStrLn $ encode res
@@ -152,7 +152,7 @@ packageCmd url copr pkg = do
 
 monitorCmd :: String -> String -> Maybe String -> IO ()
 monitorCmd url copr mfields = do
-  let (user,proj) = splitCopr copr
+  let (user,proj) = splitCopr' copr
   res <- coprMonitorProject url user proj $ maybe [] (splitOn ",") mfields
   let pkgs = lookupKey' "packages" res :: [Object]
   -- FIXME improve output/order fields
@@ -186,11 +186,17 @@ monitorCmd url copr mfields = do
             Just st -> "[" <> st <> "]"
             Nothing -> ""
 
-splitCopr :: String -> (String, String)
+splitCopr :: String -> Maybe (String, String)
 splitCopr copr =
   case splitOn "/" copr of
+    [u,c] | not (null u || null c) -> Just (u,c)
+    _ -> Nothing
+
+splitCopr' :: String -> (String, String)
+splitCopr' copr =
+  case splitOn "/" copr of
     [u,c] | not (null u || null c) -> (u,c)
-    _ -> error' $ "bad copr name: should be user/proj"
+    _ -> error' "expected copr project format: user/proj"
 
 coprProgress :: Bool -> String -> String -> Maybe Int -> IO ()
 coprProgress debug server copr mbuild = do
