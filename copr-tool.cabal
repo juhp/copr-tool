@@ -2,23 +2,27 @@ name:                copr-tool
 version:             0.1.0
 synopsis:            One line summary
 description:
-        Short paragraph here
+        A CLI tool to query the Fedora Copr buildsystem.
 license:             BSD3
 license-file:        LICENSE
 author:              Jens Petersen <juhpetersen@gmail.com>
 maintainer:          Jens Petersen <juhpetersen@gmail.com>
-copyright:           2022  Jens Petersen <juhpetersen@gmail.com>
-category:            Unclassified
+copyright:           2022-2024  Jens Petersen <juhpetersen@gmail.com>
+category:            Utilities
 homepage:            https://github.com/juhp/copr-tool
 bug-reports:         https://github.com/juhp/copr-tool/issues
 build-type:          Simple
---  extra-doc-files:     README.md
+extra-doc-files:     README.md
 --                       ChangeLog.md
 cabal-version:       2.0
--- tested-with:         GHC == 8.6.5
---                        | == 8.8.4
---                        | == 8.10.7
---                        | == 9.0.2
+tested-with:         GHC == 8.6.5
+                       | == 8.8.4
+                       | == 8.10.7
+                       | == 9.0.2
+                       | == 9.2.8
+                       | == 9.4.8
+                       | == 9.6.4
+                       | == 9.8.1
 
 source-repository head
   type:                git
