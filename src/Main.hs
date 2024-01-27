@@ -234,13 +234,17 @@ coprProgress debug server copr mbuild = do
       let results = repo_url +/+ chroot +/+ displayBuild bid ++ "-" ++ name
       -- FIXME maybe get all Headers
       -- FIXME this redirects to builder-live.log.gz
-      sizetime <- httpFileSizeTime' $ results +/+ "builder-live.log"
-      putStr $ renderBuild chroot tz sizetime started_on
-      success <- httpExists' $ results +/+ "success"
-      if success
-        then putStrLn " done"
-        else putStrLn ""
-      putStrLn $ trailingSlash results
+      exists <- httpExists' $ results +/+ "builder-live.log"
+      if exists
+        then do
+        sizetime <- httpFileSizeTime' $ results +/+ "builder-live.log"
+        putStr $ renderBuild chroot tz sizetime started_on
+        success <- httpExists' $ results +/+ "success"
+        if success
+          then putStrLn " done"
+          else putStrLn ""
+        putStrLn $ trailingSlash results
+        else putStrLn $ chroot ++ ": no builder-live.log yet"
   where
     displayBuild :: Int -> String
     displayBuild bid =
