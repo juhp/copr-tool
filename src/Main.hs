@@ -198,12 +198,19 @@ splitCopr' copr =
     [u,c] | not (null u || null c) -> (u,c)
     _ -> error' "expected copr project format: user/proj"
 
+-- FIXME repeat until all done
+-- FIXME optional arch/chroot
 coprProgress :: Bool -> String -> String -> Maybe Int -> IO ()
 coprProgress debug server copr mbuild = do
   items <-
     case mbuild of
       Nothing -> do
-        let (user,proj) = splitCopr copr
+        (user,proj) <-
+          case splitCopr copr of
+            Just (u,p) -> return (u,p)
+            Nothing -> do
+              fasid <- fasIdFromKrb
+              return (fasid, copr)
         res <- coprGetBuildList server user proj [makeItem "status" "running"]
         return $ (lookupKey' "items" res :: [Object])
       Just buildid -> pure <$> coprGetBuild server buildid
@@ -267,3 +274,23 @@ renderDuration short dur =
 renderDuration short dur =
   show dur ++ if short then "" else "sec"
 #endif
+
+-- copied from fbrnch Koji
+maybeFasIdFromKrb :: IO (Maybe String)
+maybeFasIdFromKrb =
+  fmap (removeSuffix "@FEDORAPROJECT.ORG") . find ("@FEDORAPROJECT.ORG" `isSuffixOf`) <$> klistEntryFedora
+
+fasIdFromKrb :: IO String
+fasIdFromKrb = do
+  mfasid <- maybeFasIdFromKrb
+  case mfasid of
+    Nothing -> error' "Could not determine fasid from klist"
+    Just fasid -> return fasid
+
+klistEntryFedora :: IO [String]
+klistEntryFedora = do
+  mres <- cmdMaybe "klist" ["-l"]
+  return $
+    maybe []
+    (words . fromMaybe "" . find ("@FEDORAPROJECT.ORG" `isInfixOf`) . lines)
+    mres
