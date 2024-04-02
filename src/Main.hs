@@ -4,7 +4,7 @@
 
 module Main (main) where
 
-import Control.Monad.Extra (forM_, unless, when, whenJust)
+import Control.Monad.Extra (forM, unless, void, when, whenJust)
 import Data.Aeson.Types
 #if MIN_VERSION_aeson(2,0,0)
 import Data.Aeson.Key
@@ -21,9 +21,10 @@ import Data.Time (
 #if MIN_VERSION_time(1,9,0)
   defaultTimeLocale, formatTime,
 #endif
-  getCurrentTimeZone, NominalDiffTime, utcToZonedTime)
+  getCurrentTimeZone, NominalDiffTime, TimeZone, utcToZonedTime)
 import Data.Time.Clock (diffUTCTime, UTCTime)
 import Data.Time.Clock.System (SystemTime(MkSystemTime), systemToUTCTime)
+import System.Time.Extra (sleep)
 import Data.Tuple.Extra
 import Data.Yaml (encode)
 import Network.HTTP.Directory (httpExists', httpFileSizeTime', trailingSlash,
@@ -203,7 +204,7 @@ splitCopr' copr =
 -- FIXME optional arch/chroot
 coprProgress :: Bool -> Bool -> String -> String -> Maybe Int -> IO ()
 coprProgress debug quiet server copr mbuild = do
-  items <-
+  builds <-
     case mbuild of
       Nothing -> do
         (user,proj) <-
@@ -213,50 +214,95 @@ coprProgress debug quiet server copr mbuild = do
               fasid <- fasIdFromKrb
               return (fasid, copr)
         res <- coprGetBuildList server user proj [makeItem "status" "running"]
+        when debug $ print res
         whenJust (lookupKey "error" res) error'
         return $ (lookupKey' "items" res :: [Object])
       Just buildid -> pure <$> coprGetBuild server buildid
-  when debug $ print items
-  forM_ items $ \build -> do
-    when debug $ print build
-    let ownername = lookupKey' "ownername" build
-        projectname = lookupKey' "projectname" build
-        -- copr-be.cloud.fedoraproject.org to avoid cloudflare caching
-        repo_url = "https://copr-be.cloud.fedoraproject.org/results" +/+ ownername +/+ projectname
-        chroots = lookupKey' "chroots" build :: [String]
-        bid = lookupKey' "id" build :: Int
-        source_package = lookupKey' "source_package" build
-        name = lookupKey' "name" source_package
-        -- FIXME can this fail?
-        started_on = readTime' $ lookupKey' "started_on" build
-    tz <- getCurrentTimeZone
-    unless quiet $ do
-      putStrLn $ show (utcToZonedTime tz started_on) +-+ show bid
-      putStrLn $ trailingSlash $ "https://copr.fedorainfracloud.org/coprs" +/+ ownername +/+ projectname +/+ "build" +/+ show bid
-    forM_ (sort chroots) $ \chroot -> do
-      let results = repo_url +/+ chroot +/+ displayBuild bid ++ "-" ++ name
-      -- FIXME maybe get all Headers
-      -- FIXME this redirects to builder-live.log.gz
-      exists <- httpExists' $ results +/+ "builder-live.log"
-      if exists
-        then do
-        sizetime <- httpFileSizeTime' $ results +/+ "builder-live.log"
-        putStr $ renderBuild chroot tz sizetime started_on
-        success <- httpExists' $ results +/+ "success"
-        if success
-          then putStrLn " done"
-          else putStrLn ""
-        unless quiet $ putStrLn $ trailingSlash results
-        else putStrLn $ chroot ++ ": no builder-live.log yet"
+  when debug $ print builds
+  tz <- getCurrentTimeZone
+  mapM_ (runProgress tz) builds
   where
+    runProgress :: TimeZone -> Object -> IO ()
+    runProgress tz obj =
+      case readBuild obj of
+        Just bld -> do
+          putStrLn $ bld_pkgname bld ++ "-" ++ bld_version bld
+          void $ doProgress tz bld
+        Nothing -> error' $ "incomplete build:" +-+ show obj
+
+    doProgress :: TimeZone -> Build -> IO Build
+    doProgress tz build@(Build project bid chroots pkgname _version start) = do
+      -- copr-be.cloud.fedoraproject.org to avoid cloudflare caching        let
+      let repo_url = "https://copr-be.cloud.fedoraproject.org/results" +/+ project
+      unless quiet $ do
+        putStrLn $ show (utcToZonedTime tz start) +-+ show bid
+        putStrLn $ trailingSlash $ "https://copr.fedorainfracloud.org/coprs" +/+ project +/+ "build" +/+ show bid
+      mrunning <-
+        forM chroots $ \(Chroot chroot sizetime) -> do
+        let results = repo_url +/+ chroot +/+ displayBuild bid ++ "-" ++ pkgname
+        unless quiet $ putStrLn $ trailingSlash results
+        -- FIXME maybe get all Headers
+        -- FIXME this redirects to builder-live.log.gz
+        exists <- httpExists' $ results +/+ "builder-live.log"
+        if exists
+          then do
+          -- FIXME check changed
+          sizetime' <- httpFileSizeTime' $ results +/+ "builder-live.log"
+          let update = sizetime /= sizetime'
+          when update $
+            renderBuild chroot tz sizetime' start
+          success <- httpExists' $ results +/+ "success"
+          if success
+            then putStrLn " done" >> return Nothing
+            else do
+            when update (putStrLn "")
+            return (Just (Chroot chroot sizetime'))
+          else do
+          putStrLn $ chroot ++ ": no builder-live.log yet"
+          return $ Just (Chroot chroot sizetime)
+      when debug $ print mrunning
+      case catMaybes mrunning of
+        [] -> return build
+        running -> do
+          sleep 61
+          doProgress tz $ build {bld_chroots = running}
+
     displayBuild :: Int -> String
     displayBuild bid =
       (if bid < 10000000 then ('0' :) else id) $
       show bid
 
     renderBuild chroot tz (msize, mtime) start =
+      whenJust mtime $ \t ->
       -- FIXME render in KB
-      maybe "" (\t -> show (utcToZonedTime tz t) +-+ renderDuration True (diffUTCTime t start)) mtime +-+ maybe "0" show msize ++ "B" +-+ chroot
+      -- FIXME just time no date
+      putStr $ show (utcToZonedTime tz t) +-+ '(' : renderDuration True (diffUTCTime t start) ++ "):" +-+ maybe "0" show msize ++ "B" +-+ chroot
+
+
+data Chroot = Chroot String (Maybe Integer, Maybe UTCTime)
+  deriving Show
+
+data Build =
+  Build
+  { _project :: String -- copr/project
+  , _id :: Int
+  , bld_chroots :: [Chroot]
+  , bld_pkgname :: String
+  , bld_version :: String
+  , _start :: UTCTime
+  }
+
+readBuild :: Object -> Maybe Build
+readBuild build = do
+  ownername <- lookupKey "ownername" build
+  projectname <- lookupKey "projectname" build
+  bid <- lookupKey "id" build
+  chroots <- lookupKey "chroots" build
+  let src_pkg = lookupKey "source_package" build
+  name <- src_pkg >>= lookupKey "name"
+  version <- src_pkg >>= lookupKey "version"
+  started_on <- readTime' <$> lookupKey "started_on" build
+  return $ Build (ownername +/+ projectname) bid (zipWith Chroot chroots (repeat (Nothing,Nothing))) name version started_on
 
 -- from koji-tool Time
 readTime' :: Double -> UTCTime
