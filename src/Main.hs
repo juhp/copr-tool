@@ -4,7 +4,7 @@
 
 module Main (main) where
 
-import Control.Monad (forM_, when)
+import Control.Monad.Extra (forM_, when, whenJust)
 import Data.Aeson.Types
 #if MIN_VERSION_aeson(2,0,0)
 import Data.Aeson.Key
@@ -212,6 +212,7 @@ coprProgress debug server copr mbuild = do
               fasid <- fasIdFromKrb
               return (fasid, copr)
         res <- coprGetBuildList server user proj [makeItem "status" "running"]
+        whenJust (lookupKey "error" res) error'
         return $ (lookupKey' "items" res :: [Object])
       Just buildid -> pure <$> coprGetBuild server buildid
   when debug $ print items
