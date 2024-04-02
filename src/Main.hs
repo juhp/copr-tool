@@ -4,7 +4,7 @@
 
 module Main (main) where
 
-import Control.Monad.Extra (forM_, when, whenJust)
+import Control.Monad.Extra (forM_, unless, when, whenJust)
 import Data.Aeson.Types
 #if MIN_VERSION_aeson(2,0,0)
 import Data.Aeson.Key
@@ -85,6 +85,7 @@ main = do
       "Follow current builds build log sizes" $
       coprProgress
       <$> switchWith 'D' "debug" "Debug output"
+      <*> switchWith 'q' "quiet" "Quiet output"
       <*> coprServerOpt
       <*> strArg "COPR"
       <*> optional (argumentWith auto "BUILD")
@@ -200,8 +201,8 @@ splitCopr' copr =
 
 -- FIXME repeat until all done
 -- FIXME optional arch/chroot
-coprProgress :: Bool -> String -> String -> Maybe Int -> IO ()
-coprProgress debug server copr mbuild = do
+coprProgress :: Bool -> Bool -> String -> String -> Maybe Int -> IO ()
+coprProgress debug quiet server copr mbuild = do
   items <-
     case mbuild of
       Nothing -> do
@@ -229,8 +230,9 @@ coprProgress debug server copr mbuild = do
         -- FIXME can this fail?
         started_on = readTime' $ lookupKey' "started_on" build
     tz <- getCurrentTimeZone
-    putStrLn $ show (utcToZonedTime tz started_on) +-+ show bid
-    putStrLn $ trailingSlash $ "https://copr.fedorainfracloud.org/coprs" +/+ ownername +/+ projectname +/+ "build" +/+ show bid
+    unless quiet $ do
+      putStrLn $ show (utcToZonedTime tz started_on) +-+ show bid
+      putStrLn $ trailingSlash $ "https://copr.fedorainfracloud.org/coprs" +/+ ownername +/+ projectname +/+ "build" +/+ show bid
     forM_ (sort chroots) $ \chroot -> do
       let results = repo_url +/+ chroot +/+ displayBuild bid ++ "-" ++ name
       -- FIXME maybe get all Headers
@@ -244,7 +246,7 @@ coprProgress debug server copr mbuild = do
         if success
           then putStrLn " done"
           else putStrLn ""
-        putStrLn $ trailingSlash results
+        unless quiet $ putStrLn $ trailingSlash results
         else putStrLn $ chroot ++ ": no builder-live.log yet"
   where
     displayBuild :: Int -> String
