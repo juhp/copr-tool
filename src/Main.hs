@@ -122,7 +122,7 @@ searchCmd url name = do
 -- FIXME print copr project url too
 projectCmd :: String -> String -> IO ()
 projectCmd url copr = do
-  let (user,proj) = splitCopr' copr
+  (user,proj) <- coprUserProject copr
   res <- coprGetProject url user proj
   -- FIXME improve output/order fields
   B.putStrLn $ encode res
@@ -136,7 +136,7 @@ ownerCmd url user = do
 -- FIXME print project packages url
 packagesCmd :: String -> String -> IO ()
 packagesCmd url copr = do
-  let (user,proj) = splitCopr' copr
+  (user,proj) <- coprUserProject copr
   res <- coprGetPackageList url user proj
   let items = lookupKey' "items" res :: [Object]
   -- FIXME improve output/order fields
@@ -145,17 +145,18 @@ packagesCmd url copr = do
 -- Not that useful - maybe remove?
 packageCmd :: String -> String -> String -> IO ()
 packageCmd url copr pkg = do
-  let (user,proj) = splitCopr' copr
+  (user,proj) <- coprUserProject copr
   res <- coprGetPackage url user proj pkg
   -- FIXME improve output/order fields
   B.putStrLn $ encode res
 
 --type ChrootResult = (Text
 
+-- FIXME buildlog sizes
 monitorCmd :: String -> String -> Maybe String -> IO ()
-monitorCmd url copr mfields = do
-  let (user,proj) = splitCopr' copr
-  res <- coprMonitorProject url user proj $ maybe [] (splitOn ",") mfields
+monitorCmd url copr _mfields = do
+  (user,proj) <- coprUserProject copr
+  res <- coprMonitorProject url user proj []
   let pkgs = lookupKey' "packages" res :: [Object]
   -- FIXME improve output/order fields
   (mapM_ printPkgRes . mapMaybe pkgResults) pkgs
@@ -194,26 +195,27 @@ splitCopr copr =
     [u,c] | not (null u || null c) -> Just (u,c)
     _ -> Nothing
 
-splitCopr' :: String -> (String, String)
-splitCopr' copr =
-  case splitOn "/" copr of
-    [u,c] | not (null u || null c) -> (u,c)
-    _ -> error' "expected copr project format: user/proj"
+coprUserProject :: String -> IO (String,String)
+coprUserProject copr =
+  case splitCopr copr of
+    Just (u,p) -> return (u,p)
+    Nothing -> do
+      fasid <- fasIdFromKrb
+      return (fasid, copr)
 
 -- FIXME repeat until all done
 -- FIXME optional arch/chroot
+-- FIXME with build, copr is mostly redundant (used to print url)
 coprProgress :: Bool -> Bool -> String -> String -> Maybe Int -> IO ()
 coprProgress debug verbose server copr mbuild = do
   builds <-
     case mbuild of
       Nothing -> do
-        (user,proj) <-
-          case splitCopr copr of
-            Just (u,p) -> return (u,p)
-            Nothing -> do
-              fasid <- fasIdFromKrb
-              return (fasid, copr)
-        res <- coprGetBuildList server user proj [makeItem "status" "running"]
+        (user,proj) <- coprUserProject copr
+        res <- coprGetBuildList server user proj
+               [makeItem "status" "running",
+                makeItem "status" "pending",
+                makeItem "status" "starting"]
         when debug $ print res
         whenJust (lookupKey "error" res) error'
         return $ (lookupKey' "items" res :: [Object])
