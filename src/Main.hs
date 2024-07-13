@@ -4,7 +4,7 @@
 
 module Main (main) where
 
-import Control.Monad.Extra (forM, unless, void, when, whenJust)
+import Control.Monad.Extra (forM, void, when, whenJust)
 import Data.Aeson.Types
 #if MIN_VERSION_aeson(2,0,0)
 import Data.Aeson.Key
@@ -86,7 +86,7 @@ main = do
       "Follow current builds build log sizes" $
       coprProgress
       <$> switchWith 'D' "debug" "Debug output"
-      <*> switchWith 'q' "quiet" "Quiet output"
+      <*> switchWith 'v' "verbose" "Verbose output"
       <*> coprServerOpt
       <*> strArg "COPR"
       <*> optional (argumentWith auto "BUILD")
@@ -203,7 +203,7 @@ splitCopr' copr =
 -- FIXME repeat until all done
 -- FIXME optional arch/chroot
 coprProgress :: Bool -> Bool -> String -> String -> Maybe Int -> IO ()
-coprProgress debug quiet server copr mbuild = do
+coprProgress debug verbose server copr mbuild = do
   builds <-
     case mbuild of
       Nothing -> do
@@ -227,20 +227,19 @@ coprProgress debug quiet server copr mbuild = do
       case readBuild obj of
         Just bld -> do
           putStrLn $ bld_pkgname bld ++ "-" ++ bld_version bld
+          putStrLn $ trailingSlash $ "https://copr.fedorainfracloud.org/coprs" +/+ copr +/+ "build" +/+ show (bld_id bld)
           void $ doProgress tz bld
         Nothing -> error' $ "incomplete build:" +-+ show obj
 
     doProgress :: TimeZone -> Build -> IO Build
     doProgress tz build@(Build project bid chroots pkgname _version start) = do
-      -- copr-be.cloud.fedoraproject.org to avoid cloudflare caching        let
+      putStrLn ""
+      -- copr-be.cloud.fedoraproject.org to avoid cloudflare caching
       let repo_url = "https://copr-be.cloud.fedoraproject.org/results" +/+ project
-      unless quiet $ do
-        putStrLn $ show (utcToZonedTime tz start) +-+ show bid
-        putStrLn $ trailingSlash $ "https://copr.fedorainfracloud.org/coprs" +/+ project +/+ "build" +/+ show bid
       mrunning <-
         forM chroots $ \(Chroot chroot sizetime) -> do
         let results = repo_url +/+ chroot +/+ displayBuild bid ++ "-" ++ pkgname
-        unless quiet $ putStrLn $ trailingSlash results
+        when verbose $ putStrLn $ trailingSlash results
         -- FIXME maybe get all Headers
         -- FIXME this redirects to builder-live.log.gz
         exists <- httpExists' $ results +/+ "builder-live.log"
@@ -285,7 +284,7 @@ data Chroot = Chroot String (Maybe Integer, Maybe UTCTime)
 data Build =
   Build
   { _project :: String -- copr/project
-  , _id :: Int
+  , bld_id :: Int
   , bld_chroots :: [Chroot]
   , bld_pkgname :: String
   , bld_version :: String
