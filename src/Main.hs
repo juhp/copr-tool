@@ -169,8 +169,8 @@ monitorCmd url copr _mfields = do
 
     printPkgRes :: (T.Text,Object) -> IO ()
     printPkgRes (name,chroots) = do
-      T.putStr $ name <> ": "
-      mapM_ printChRes $ map (first toText) $ M.toList chroots
+      T.putStrLn $ "# " <> name
+      mapM_ (printChRes . first toText) $ M.toList chroots
       T.putStrLn ""
 #if !MIN_VERSION_aeson(2,0,0)
       where toText = id
@@ -178,16 +178,16 @@ monitorCmd url copr _mfields = do
 
     printChRes :: (T.Text,Value) -> IO ()
     printChRes (chr, val) =
-      T.putStr $ chr <>
+      T.putStrLn $ chr <> ": " <>
       case val of
-        Object obj -> chrState obj <> " "
+        Object obj -> fromMaybe "" $ chrResults obj
         _ -> error' $ "bad chroot result for " <> T.unpack chr
       where
-        chrState :: Object -> T.Text
-        chrState obj = do
-          case lookupKey "state" obj of
-            Just st -> "[" <> st <> "]"
-            Nothing -> ""
+        chrResults :: Object -> Maybe T.Text
+        chrResults obj = do
+          state <- lookupKey "state" obj
+          version <- lookupKey "pkg_version" obj
+          return $ state <> " " <> version
 
 splitCopr :: String -> Maybe (String, String)
 splitCopr copr =
